@@ -12,7 +12,7 @@ async function requireAuth(req, res, next) {
     if (!user || user.status === 'INACTIVE') return res.status(401).json({ error: 'Unauthorized' });
     req.user = user;
     next();
-  } catch {
+  } catch (err) {
     res.status(401).json({ error: 'Unauthorized' });
   }
 }

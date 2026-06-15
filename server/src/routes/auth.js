@@ -4,13 +4,14 @@ const jwt = require('jsonwebtoken');
 const { z } = require('zod');
 const { getPrisma } = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const asyncHandler = require('../utils/asyncHandler');
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', asyncHandler(async (req, res) => {
   const parse = loginSchema.safeParse(req.body);
   if (!parse.success) return res.status(400).json({ error: 'Invalid input' });
   const { email, password } = parse.data;
@@ -24,7 +25,7 @@ router.post('/login', async (req, res) => {
     token,
     user: { id: user.id, fullName: user.fullName, email: user.email, status: user.status },
   });
-});
+}));
 
 router.get('/me', requireAuth, (req, res) => {
   const { id, fullName, email, status } = req.user;
@@ -36,7 +37,7 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8),
 });
 
-router.post('/change-password', requireAuth, async (req, res) => {
+router.post('/change-password', requireAuth, asyncHandler(async (req, res) => {
   const parse = changePasswordSchema.safeParse(req.body);
   if (!parse.success) return res.status(400).json({ error: 'Invalid input' });
   const { currentPassword, newPassword } = parse.data;
@@ -46,6 +47,6 @@ router.post('/change-password', requireAuth, async (req, res) => {
   const prisma = getPrisma();
   await prisma.user.update({ where: { id: req.user.id }, data: { passwordHash: hash } });
   res.json({ message: 'Password changed' });
-});
+}));
 
 module.exports = router;

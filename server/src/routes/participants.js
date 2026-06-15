@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const { getProgramRole, getCoachGroups, canAccessParticipant, requireProgramRoleMin } = require('../middleware/rbac');
 const { encryptParticipant, decryptParticipant } = require('../services/encryption');
 const { log } = require('../services/audit');
+const ah = require('../utils/asyncHandler');
 
 const participantInclude = {
   group: { select: { id: true, groupNumber: true, name: true } },
@@ -22,11 +23,11 @@ async function listParticipantsForUser(userId, programId, role) {
   return rows.map(decryptParticipant);
 }
 
-router.get('/programs/:programId/participants', requireAuth, async (req, res) => {
+router.get('/programs/:programId/participants', requireAuth, ah(async (req, res) => {
   const role = await getProgramRole(req.user.id, req.params.programId);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   res.json(await listParticipantsForUser(req.user.id, req.params.programId, role));
-});
+}));
 
 const createSchema = z.object({
   firstName: z.string().min(1),
@@ -39,12 +40,11 @@ const createSchema = z.object({
   whatAccomplish: z.string().optional(),
 });
 
-router.post('/programs/:programId/participants', requireAuth, async (req, res) => {
+router.post('/programs/:programId/participants', requireAuth, ah(async (req, res) => {
   const role = await getProgramRole(req.user.id, req.params.programId);
   if (!role) return res.status(403).json({ error: 'Forbidden' });
   const parse = createSchema.safeParse(req.body);
   if (!parse.success) return res.status(400).json({ error: parse.error.errors });
-
   const enc = encryptParticipant(parse.data);
   const prisma = getPrisma();
   const participant = await prisma.participant.create({
@@ -57,9 +57,9 @@ router.post('/programs/:programId/participants', requireAuth, async (req, res) =
     after: { firstName: parse.data.firstName, lastName: parse.data.lastName },
   });
   res.status(201).json(decryptParticipant(participant));
-});
+}));
 
-router.get('/participants/:participantId', requireAuth, async (req, res) => {
+router.get('/participants/:participantId', requireAuth, ah(async (req, res) => {
   const prisma = getPrisma();
   const raw = await prisma.participant.findUnique({
     where: { id: req.params.participantId },
@@ -69,39 +69,31 @@ router.get('/participants/:participantId', requireAuth, async (req, res) => {
   const role = await getProgramRole(req.user.id, raw.programId);
   if (!(await canAccessParticipant(req.user.id, raw, role))) return res.status(403).json({ error: 'Forbidden' });
   res.json(decryptParticipant(raw));
-});
+}));
 
 const updateSchema = createSchema.partial();
 
-router.patch('/participants/:participantId', requireAuth, async (req, res) => {
+router.patch('/participants/:participantId', requireAuth, ah(async (req, res) => {
   const prisma = getPrisma();
   const raw = await prisma.participant.findUnique({ where: { id: req.params.participantId } });
   if (!raw) return res.status(404).json({ error: 'Not found' });
   const role = await getProgramRole(req.user.id, raw.programId);
   if (!(await canAccessParticipant(req.user.id, raw, role))) return res.status(403).json({ error: 'Forbidden' });
-
   const parse = updateSchema.safeParse(req.body);
   if (!parse.success) return res.status(400).json({ error: parse.error.errors });
-
-  // Decrypt current values and merge
   const current = decryptParticipant(raw);
   const merged = { ...current, ...parse.data };
   const enc = encryptParticipant(merged);
-
   const updated = await prisma.participant.update({
     where: { id: req.params.participantId },
     data: { ...enc, groupId: parse.data.groupId !== undefined ? parse.data.groupId : raw.groupId },
     include: participantInclude,
   });
-  await log({
-    actorUserId: req.user.id, action: 'UPDATE', entity: 'Participant',
-    entityId: raw.id, participantId: raw.id,
-  });
+  await log({ actorUserId: req.user.id, action: 'UPDATE', entity: 'Participant', entityId: raw.id, participantId: raw.id });
   res.json(decryptParticipant(updated));
-});
+}));
 
-// Move participant to another group
-router.patch('/participants/:participantId/move', requireAuth, requireProgramRoleMin('HEAD_COACH'), async (req, res) => {
+router.patch('/participants/:participantId/move', requireAuth, requireProgramRoleMin('HEAD_COACH'), ah(async (req, res) => {
   const { groupId } = req.body;
   const prisma = getPrisma();
   const raw = await prisma.participant.findUnique({ where: { id: req.params.participantId } });
@@ -113,10 +105,9 @@ router.patch('/participants/:participantId/move', requireAuth, requireProgramRol
   });
   await log({ actorUserId: req.user.id, action: 'MOVE_GROUP', entity: 'Participant', entityId: raw.id, participantId: raw.id, after: { groupId } });
   res.json(decryptParticipant(updated));
-});
+}));
 
-// Soft delete (Leader only)
-router.delete('/participants/:participantId', requireAuth, async (req, res) => {
+router.delete('/participants/:participantId', requireAuth, ah(async (req, res) => {
   const prisma = getPrisma();
   const raw = await prisma.participant.findUnique({ where: { id: req.params.participantId } });
   if (!raw) return res.status(404).json({ error: 'Not found' });
@@ -128,6 +119,6 @@ router.delete('/participants/:participantId', requireAuth, async (req, res) => {
   });
   await log({ actorUserId: req.user.id, action: 'SOFT_DELETE', entity: 'Participant', entityId: raw.id, participantId: raw.id });
   res.json({ message: 'Deleted' });
-});
+}));
 
 module.exports = router;

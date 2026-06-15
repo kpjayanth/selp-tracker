@@ -6,6 +6,7 @@ const { getProgramRole } = require('../middleware/rbac');
 const { encryptParticipant, hmacToken } = require('../services/encryption');
 const { getUpload } = require('../utils/upload');
 const { log } = require('../services/audit');
+const ah = require('../utils/asyncHandler');
 
 const COL_MAP = {
   'First Name': 'firstName',
@@ -25,26 +26,22 @@ const COL_MAP = {
 function parseSheet(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer' });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-  return rows;
+  return XLSX.utils.sheet_to_json(ws, { defval: '' });
 }
 
 function normalizeRow(row) {
   const out = {};
   for (const [col, field] of Object.entries(COL_MAP)) {
-    // Try exact, then case-insensitive, then partial match
-    const key = Object.keys(row).find((k) => k === col || k.toLowerCase().trim() === col.toLowerCase().trim() || col.toLowerCase().includes(k.toLowerCase().trim().slice(0, 10)));
+    const key = Object.keys(row).find((k) => k === col || k.toLowerCase().trim() === col.toLowerCase().trim());
     out[field] = key ? String(row[key] || '').trim() : '';
   }
   return out;
 }
 
-// Preview import (dry run)
-router.post('/programs/:programId/import/preview', requireAuth, getUpload().single('file'), async (req, res) => {
+router.post('/programs/:programId/import/preview', requireAuth, getUpload().single('file'), ah(async (req, res) => {
   const { programId } = req.params;
   const role = await getProgramRole(req.user.id, programId);
   if (!['LEADER', 'PROGRAM_COACH', 'HEAD_COACH'].includes(role)) return res.status(403).json({ error: 'Forbidden' });
-
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
   const rows = parseSheet(req.file.buffer);
@@ -70,14 +67,12 @@ router.post('/programs/:programId/import/preview', requireAuth, getUpload().sing
     skip: preview.filter((r) => r.status === 'SKIP').length,
   };
   res.json({ summary, rows: preview });
-});
+}));
 
-// Commit import
-router.post('/programs/:programId/import/commit', requireAuth, getUpload().single('file'), async (req, res) => {
+router.post('/programs/:programId/import/commit', requireAuth, getUpload().single('file'), ah(async (req, res) => {
   const { programId } = req.params;
   const role = await getProgramRole(req.user.id, programId);
   if (!['LEADER', 'PROGRAM_COACH', 'HEAD_COACH'].includes(role)) return res.status(403).json({ error: 'Forbidden' });
-
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
   const groupId = req.body.groupId || null;
@@ -89,28 +84,19 @@ router.post('/programs/:programId/import/commit', requireAuth, getUpload().singl
   });
 
   const results = { created: 0, updated: 0, skipped: 0, errors: [] };
-
   for (const rawRow of rows) {
     const row = normalizeRow(rawRow);
     if (!row.firstName && !row.lastName) { results.skipped++; continue; }
-
     const fToken = hmacToken(row.firstName);
     const lToken = hmacToken(row.lastName);
     const match = existing.find((p) => p.firstNameToken === fToken && p.lastNameToken === lToken);
-
     const projectData = {
-      whoIAmPossibility: row.whoIAmPossibility || null,
-      targetCommunity: row.targetCommunity || null,
-      projectPossibility: row.projectPossibility || null,
-      projectDescription: row.projectDescription || null,
-      projectName: row.projectName || null,
-      smrEndOfProgram: row.smrEndOfProgram || null,
-      milestoneWorkday3: row.milestoneWorkday3 || null,
-      milestoneWorkday2: row.milestoneWorkday2 || null,
-      promotionResources: row.promotionResources || null,
-      forumRegistrations: row.forumRegistrations || null,
+      whoIAmPossibility: row.whoIAmPossibility || null, targetCommunity: row.targetCommunity || null,
+      projectPossibility: row.projectPossibility || null, projectDescription: row.projectDescription || null,
+      projectName: row.projectName || null, smrEndOfProgram: row.smrEndOfProgram || null,
+      milestoneWorkday3: row.milestoneWorkday3 || null, milestoneWorkday2: row.milestoneWorkday2 || null,
+      promotionResources: row.promotionResources || null, forumRegistrations: row.forumRegistrations || null,
     };
-
     try {
       if (match) {
         await prisma.communityProject.upsert({
@@ -121,9 +107,7 @@ router.post('/programs/:programId/import/commit', requireAuth, getUpload().singl
         results.updated++;
       } else {
         const enc = encryptParticipant({ firstName: row.firstName, lastName: row.lastName });
-        const participant = await prisma.participant.create({
-          data: { ...enc, programId, groupId },
-        });
+        const participant = await prisma.participant.create({ data: { ...enc, programId, groupId } });
         await prisma.communityProject.create({ data: { participantId: participant.id, ...projectData } });
         results.created++;
       }
@@ -131,9 +115,8 @@ router.post('/programs/:programId/import/commit', requireAuth, getUpload().singl
       results.errors.push({ name: `${row.firstName} ${row.lastName}`, error: e.message });
     }
   }
-
   await log({ actorUserId: req.user.id, action: 'IMPORT', entity: 'Program', entityId: programId, after: results });
   res.json(results);
-});
+}));
 
 module.exports = router;

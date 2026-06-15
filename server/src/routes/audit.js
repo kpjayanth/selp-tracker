@@ -2,25 +2,22 @@ const router = require('express').Router();
 const { getPrisma } = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { getProgramRole } = require('../middleware/rbac');
+const ah = require('../utils/asyncHandler');
 
-router.get('/programs/:programId/audit', requireAuth, async (req, res) => {
+router.get('/programs/:programId/audit', requireAuth, ah(async (req, res) => {
   const { programId } = req.params;
   const role = await getProgramRole(req.user.id, programId);
   if (!['LEADER', 'PROGRAM_COACH'].includes(role)) return res.status(403).json({ error: 'Forbidden' });
-
   const prisma = getPrisma();
-  // Get audit logs related to this program's participants and the program itself
   const participants = await prisma.participant.findMany({ where: { programId }, select: { id: true } });
   const pids = participants.map((p) => p.id);
-
+  const groups = await prisma.group.findMany({ where: { programId }, select: { id: true } });
+  const gids = groups.map((g) => g.id);
   const logs = await prisma.auditLog.findMany({
     where: {
       OR: [
         { entity: 'Program', entityId: programId },
-        { entity: 'Group', entityId: { in: await (async () => {
-          const groups = await prisma.group.findMany({ where: { programId }, select: { id: true } });
-          return groups.map((g) => g.id);
-        })() } },
+        { entity: 'Group', entityId: { in: gids } },
         { participantId: { in: pids } },
       ],
     },
@@ -29,6 +26,6 @@ router.get('/programs/:programId/audit', requireAuth, async (req, res) => {
     take: 200,
   });
   res.json(logs);
-});
+}));
 
 module.exports = router;
