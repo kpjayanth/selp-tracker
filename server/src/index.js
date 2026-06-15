@@ -43,6 +43,9 @@ app.get('/api/debug', async (req, res) => {
   try {
     await getPrisma().$queryRaw`SELECT 1`;
     checks.db = true;
+    // Check if users table exists
+    const count = await getPrisma().user.count();
+    checks.userCount = count;
   } catch (e) {
     checks.dbError = e.message;
   }
