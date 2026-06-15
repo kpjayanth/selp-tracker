@@ -1,0 +1,231 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(uuid())
+  fullName     String
+  email        String        @unique
+  passwordHash String
+  status       UserStatus    @default(ACTIVE)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  programRoles  ProgramRole[]
+  groupCoaches  GroupCoach[]
+  projectUpdates ProjectUpdate[]
+  comments      Comment[]
+  mediaAssets   MediaAsset[]
+  auditLogs     AuditLog[]
+  createdPrograms Program[]
+
+  @@map("users")
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  INACTIVE
+}
+
+model Program {
+  id          String        @id @default(uuid())
+  name        String
+  location    String?
+  startDate   DateTime?
+  endDate     DateTime?
+  status      ProgramStatus @default(PLANNED)
+  createdById String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  createdBy    User          @relation(fields: [createdById], references: [id])
+  roles        ProgramRole[]
+  groups       Group[]
+  participants Participant[]
+
+  @@map("programs")
+}
+
+enum ProgramStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+}
+
+model ProgramRole {
+  id        String      @id @default(uuid())
+  programId String
+  userId    String
+  role      Role
+  createdAt DateTime    @default(now())
+
+  program Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([programId, userId])
+  @@map("program_roles")
+}
+
+enum Role {
+  LEADER
+  PROGRAM_COACH
+  HEAD_COACH
+  COACH
+}
+
+model Group {
+  id          String   @id @default(uuid())
+  programId   String
+  groupNumber Int
+  name        String?
+  createdAt   DateTime @default(now())
+
+  program      Program      @relation(fields: [programId], references: [id], onDelete: Cascade)
+  coaches      GroupCoach[]
+  participants Participant[]
+
+  @@unique([programId, groupNumber])
+  @@map("groups")
+}
+
+model GroupCoach {
+  id      String @id @default(uuid())
+  groupId String
+  userId  String
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@map("group_coaches")
+}
+
+model Participant {
+  id            String   @id @default(uuid())
+  programId     String
+  groupId       String?
+  // PII - stored encrypted
+  firstNameEnc  String
+  lastNameEnc   String
+  phoneEnc      String?
+  familyEnc     String?
+  whatsImportantEnc String?
+  whyJoinedEnc  String?
+  whatAccomplishEnc String?
+  // Encrypted search tokens (HMAC of plaintext for equality search)
+  firstNameToken String?
+  lastNameToken  String?
+
+  isDeleted   Boolean  @default(false)
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  program Program          @relation(fields: [programId], references: [id], onDelete: Cascade)
+  group   Group?           @relation(fields: [groupId], references: [id])
+  project CommunityProject?
+  auditLogs AuditLog[]
+
+  @@map("participants")
+}
+
+model CommunityProject {
+  id                  String   @id @default(uuid())
+  participantId       String   @unique
+  whoIAmPossibility   String?  @db.Text
+  targetCommunity     String?  @db.Text
+  projectPossibility  String?  @db.Text
+  projectDescription  String?  @db.Text
+  projectName         String?
+  smrEndOfProgram     String?  @db.Text
+  milestoneWorkday3   String?  @db.Text
+  milestoneWorkday2   String?  @db.Text
+  promotionResources  String?  @db.Text
+  forumRegistrations  String?  @db.Text
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  participant  Participant     @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  updates      ProjectUpdate[]
+  comments     Comment[]
+  mediaAssets  MediaAsset[]
+
+  @@map("community_projects")
+}
+
+model ProjectUpdate {
+  id             String   @id @default(uuid())
+  projectId      String
+  authorUserId   String
+  body           String   @db.Text
+  progressStatus String?
+  createdAt      DateTime @default(now())
+
+  project     CommunityProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  author      User             @relation(fields: [authorUserId], references: [id])
+  comments    Comment[]
+  mediaAssets MediaAsset[]
+
+  @@map("project_updates")
+}
+
+model Comment {
+  id           String   @id @default(uuid())
+  projectId    String?
+  updateId     String?
+  authorUserId String
+  body         String   @db.Text
+  createdAt    DateTime @default(now())
+
+  project CommunityProject? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  update  ProjectUpdate?    @relation(fields: [updateId], references: [id], onDelete: Cascade)
+  author  User              @relation(fields: [authorUserId], references: [id])
+
+  @@map("comments")
+}
+
+model MediaAsset {
+  id           String          @id @default(uuid())
+  projectId    String?
+  updateId     String?
+  type         MediaType
+  storageKey   String?
+  url          String?
+  originalName String?
+  uploadedById String
+  createdAt    DateTime        @default(now())
+
+  project  CommunityProject? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  update   ProjectUpdate?    @relation(fields: [updateId], references: [id], onDelete: Cascade)
+  uploader User              @relation(fields: [uploadedById], references: [id])
+
+  @@map("media_assets")
+}
+
+enum MediaType {
+  PHOTO
+  VIDEO_LINK
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  actorUserId   String
+  action        String
+  entity        String
+  entityId      String
+  participantId String?
+  before        Json?
+  after         Json?
+  createdAt     DateTime @default(now())
+
+  actor       User         @relation(fields: [actorUserId], references: [id])
+  participant Participant? @relation(fields: [participantId], references: [id])
+
+  @@map("audit_logs")
+}
