@@ -29,6 +29,26 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
+// Debug: check env vars + DB connectivity (no secrets exposed)
+app.get('/api/debug', async (req, res) => {
+  const { getPrisma } = require('./db');
+  const checks = {
+    DATABASE_URL: !!process.env.DATABASE_URL,
+    JWT_SECRET: !!process.env.JWT_SECRET,
+    ENCRYPTION_KEY: !!process.env.ENCRYPTION_KEY,
+    HMAC_KEY: !!process.env.HMAC_KEY,
+    db: false,
+    dbError: null,
+  };
+  try {
+    await getPrisma().$queryRaw`SELECT 1`;
+    checks.db = true;
+  } catch (e) {
+    checks.dbError = e.message;
+  }
+  res.json(checks);
+});
+
 app.use('/api/auth', authRouter);
 app.use('/api', programsRouter);
 app.use('/api', groupsRouter);
@@ -41,27 +61,6 @@ app.use('/api', auditRouter);
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });
-});
-
-// Add a debug endpoint to check env + DB connectivity (non-sensitive)
-app.get('/api/debug', async (req, res) => {
-  const { getPrisma } = require('./db');
-  const checks = {
-    DATABASE_URL: !!process.env.DATABASE_URL,
-    JWT_SECRET: !!process.env.JWT_SECRET,
-    ENCRYPTION_KEY: !!process.env.ENCRYPTION_KEY,
-    HMAC_KEY: !!process.env.HMAC_KEY,
-    db: false,
-    dbError: null,
-  };
-  try {
-    const prisma = getPrisma();
-    await prisma.$queryRaw`SELECT 1`;
-    checks.db = true;
-  } catch (e) {
-    checks.dbError = e.message;
-  }
-  res.json(checks);
 });
 
 const PORT = process.env.PORT || 4000;
