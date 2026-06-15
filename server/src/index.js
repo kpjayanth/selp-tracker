@@ -27,6 +27,8 @@ app.use('/api/auth', authLimiter);
 // Serve uploaded photos
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+app.get('/api/health', (req, res) => res.json({ ok: true }));
+
 app.use('/api/auth', authRouter);
 app.use('/api', programsRouter);
 app.use('/api', groupsRouter);
@@ -35,8 +37,6 @@ app.use('/api', projectsRouter);
 app.use('/api', searchRouter);
 app.use('/api', importRouter);
 app.use('/api', auditRouter);
-
-app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 app.use((err, req, res, next) => {
   console.error(err);
