@@ -43,5 +43,31 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+// Add a debug endpoint to check env + DB connectivity (non-sensitive)
+app.get('/api/debug', async (req, res) => {
+  const { getPrisma } = require('./db');
+  const checks = {
+    DATABASE_URL: !!process.env.DATABASE_URL,
+    JWT_SECRET: !!process.env.JWT_SECRET,
+    ENCRYPTION_KEY: !!process.env.ENCRYPTION_KEY,
+    HMAC_KEY: !!process.env.HMAC_KEY,
+    db: false,
+    dbError: null,
+  };
+  try {
+    const prisma = getPrisma();
+    await prisma.$queryRaw`SELECT 1`;
+    checks.db = true;
+  } catch (e) {
+    checks.dbError = e.message;
+  }
+  res.json(checks);
+});
+
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`SELP API running on :${PORT}`));
+app.listen(PORT, () => {
+  console.log(`SELP API running on :${PORT}`);
+  const required = ['DATABASE_URL', 'JWT_SECRET', 'ENCRYPTION_KEY', 'HMAC_KEY'];
+  const missing = required.filter((k) => !process.env[k]);
+  if (missing.length) console.error('MISSING ENV VARS:', missing.join(', '));
+});
